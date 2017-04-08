@@ -1,12 +1,12 @@
 /**
  * Copyright 2016 Bartosz Schiller
- * <p>
+ * <p/>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ * <p/>
  * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ * <p/>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,95 +19,89 @@ import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.os.AsyncTask;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 
 import com.github.barteksc.pdfviewer.model.PagePart;
 import com.shockwave.pdfium.PdfDocument;
 import com.shockwave.pdfium.PdfiumCore;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
-class RenderingAsyncTask extends AsyncTask<Void, PagePart, Void> {
+/**
+ * A {@link Handler} that will process incoming {@link RenderingTask} messages
+ * and alert {@link PDFView#onBitmapRendered(PagePart)} when the portion of the
+ * PDF is ready to render.
+ */
+class RenderingHandler extends Handler {
+    /**
+     * {@link Message#what} kind of message this handler processes.
+     */
+    static final int MSG_RENDER_TASK = 1;
 
     private PdfiumCore pdfiumCore;
     private PdfDocument pdfDocument;
-
-    private final List<RenderingTask> renderingTasks = new ArrayList<>();
 
     private PDFView pdfView;
 
     private RectF renderBounds = new RectF();
     private Rect roundedRenderBounds = new Rect();
     private Matrix renderMatrix = new Matrix();
+    private final Set<Integer> openedPages = new HashSet<>();
+    private boolean running = false;
 
-    public RenderingAsyncTask(PDFView pdfView, PdfiumCore pdfiumCore, PdfDocument pdfDocument) {
+    RenderingHandler(Looper looper, PDFView pdfView, PdfiumCore pdfiumCore, PdfDocument pdfDocument) {
+        super(looper);
         this.pdfView = pdfView;
         this.pdfiumCore = pdfiumCore;
         this.pdfDocument = pdfDocument;
     }
 
-    public void addRenderingTask(int userPage, int page, float width, float height, RectF bounds, boolean thumbnail, int cacheOrder, boolean bestQuality) {
-        RenderingTask task = new RenderingTask(width, height, bounds, userPage, page, thumbnail, cacheOrder, bestQuality);
-        renderingTasks.add(task);
-        wakeUp();
+    void addRenderingTask(int userPage, int page, float width, float height, RectF bounds, boolean thumbnail, int cacheOrder, boolean bestQuality, boolean annotationRendering) {
+        RenderingTask task = new RenderingTask(width, height, bounds, userPage, page, thumbnail, cacheOrder, bestQuality, annotationRendering);
+        Message msg = obtainMessage(MSG_RENDER_TASK, task);
+        sendMessage(msg);
     }
 
     @Override
-    protected void onPreExecute() {
-    }
-
-    @Override
-    protected Void doInBackground(Void... params) {
-        while (!isCancelled()) {
-
-            // Proceed all tasks
-            while (!renderingTasks.isEmpty()) {
-                RenderingTask task = renderingTasks.get(0);
-                PagePart part = proceed(task);
-
-                if (renderingTasks.remove(task)) {
-                    publishProgress(part);
-                } else {
-                    part.getRenderedBitmap().recycle();
-                }
+    public void handleMessage(Message message) {
+        RenderingTask task = (RenderingTask) message.obj;
+        final PagePart part = proceed(task);
+        if (part != null) {
+            if (running) {
+                pdfView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        pdfView.onBitmapRendered(part);
+                    }
+                });
+            } else {
+                part.getRenderedBitmap().recycle();
             }
-
-            // Wait for new task, return if canceled
-            if (!waitForRenderingTasks() || isCancelled()) {
-                return null;
-            }
-
-        }
-        return null;
-
-    }
-
-    @Override
-    protected void onProgressUpdate(PagePart... part) {
-        pdfView.onBitmapRendered(part[0]);
-    }
-
-    private boolean waitForRenderingTasks() {
-        try {
-            synchronized (renderingTasks) {
-                renderingTasks.wait();
-            }
-            return true;
-        } catch (InterruptedException e) {
-            return false;
         }
     }
 
     private PagePart proceed(RenderingTask renderingTask) {
+        if (!openedPages.contains(renderingTask.page)) {
+            openedPages.add(renderingTask.page);
+            pdfiumCore.openPage(pdfDocument, renderingTask.page);
+        }
+
         int w = Math.round(renderingTask.width);
         int h = Math.round(renderingTask.height);
-        Bitmap render = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Bitmap render;
+        try {
+            render = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        } catch (IllegalArgumentException e) {
+            e.printStackTrace();
+            return null;
+        }
         calculateBounds(w, h, renderingTask.bounds);
-
         pdfiumCore.renderPageBitmap(pdfDocument, render, renderingTask.page,
                 roundedRenderBounds.left, roundedRenderBounds.top,
-                roundedRenderBounds.width(), roundedRenderBounds.height());
+                roundedRenderBounds.width(), roundedRenderBounds.height(), renderingTask.annotationRendering);
 
         if (!renderingTask.bestQuality) {
             Bitmap cpy = render.copy(Bitmap.Config.RGB_565, false);
@@ -131,14 +125,12 @@ class RenderingAsyncTask extends AsyncTask<Void, PagePart, Void> {
         renderBounds.round(roundedRenderBounds);
     }
 
-    public void removeAllTasks() {
-        renderingTasks.clear();
+    void stop() {
+        running = false;
     }
 
-    public void wakeUp() {
-        synchronized (renderingTasks) {
-            renderingTasks.notify();
-        }
+    void start() {
+        running = true;
     }
 
     private class RenderingTask {
@@ -157,8 +149,9 @@ class RenderingAsyncTask extends AsyncTask<Void, PagePart, Void> {
 
         boolean bestQuality;
 
-        public RenderingTask(float width, float height, RectF bounds, int userPage, int page, boolean thumbnail, int cacheOrder, boolean bestQuality) {
-            super();
+        boolean annotationRendering;
+
+        RenderingTask(float width, float height, RectF bounds, int userPage, int page, boolean thumbnail, int cacheOrder, boolean bestQuality, boolean annotationRendering) {
             this.page = page;
             this.width = width;
             this.height = height;
@@ -167,8 +160,7 @@ class RenderingAsyncTask extends AsyncTask<Void, PagePart, Void> {
             this.thumbnail = thumbnail;
             this.cacheOrder = cacheOrder;
             this.bestQuality = bestQuality;
+            this.annotationRendering = annotationRendering;
         }
-
     }
-
 }

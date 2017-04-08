@@ -1,12 +1,12 @@
 /**
  * Copyright 2016 Bartosz Schiller
- * <p>
+ * <p/>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ * <p/>
  * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ * <p/>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,53 +15,36 @@
  */
 package com.github.barteksc.pdfviewer.util;
 
-public interface Constants {
+public class Constants {
 
-    boolean DEBUG_MODE = false;
+    public static boolean DEBUG_MODE = false;
 
-    /** Size of the minimum, in percent of the component size */
-    float MINIMAP_MAX_SIZE = 200f;
-
-    /** Number of pages loaded (default 3) */
-    int LOADED_SIZE = 3;
-
-    /** Between 0 and 1, the thumbnails quality (default 0.2) */
-    float THUMBNAIL_RATIO = 0.2f;
+    /** Between 0 and 1, the thumbnails quality (default 0.3). Increasing this value may cause performance decrease */
+    public static float THUMBNAIL_RATIO = 0.3f;
 
     /**
      * The size of the rendered parts (default 256)
      * Tinier : a little bit slower to have the whole page rendered but more reactive.
      * Bigger : user will have to wait longer to have the first visual results
      */
-    float PART_SIZE = 256;
+    public static float PART_SIZE = 256;
 
-    /** Transparency of masks around the main page (between 0 and 255, default 50) */
-    int MASK_ALPHA = 20;
+    /** Number of preloaded rows or columns */
+    public static int PRELOAD_COUNT = 7;
 
-    /** The size of the grid of loaded images around the current point */
-    int GRID_SIZE = 10;
-
-    interface Cache {
+    public static class Cache {
 
         /** The size of the cache (number of bitmaps kept) */
-        int CACHE_SIZE = (int) Math.pow(GRID_SIZE, 2d);
+        public static int CACHE_SIZE = 150;
 
-        int THUMBNAILS_CACHE_SIZE = 4;
+        public static int THUMBNAILS_CACHE_SIZE = 6;
     }
 
-    interface Pinch {
+    public static class Pinch {
 
-        float MAXIMUM_ZOOM = 10;
+        public static float MAXIMUM_ZOOM = 10;
 
-        float MINIMUM_ZOOM = 1;
-
-        /**
-         * A move must be quicker than this duration and longer than
-         * this distance to be considered as a quick move
-         */
-        int QUICK_MOVE_THRESHOLD_TIME = 250, //
-
-        QUICK_MOVE_THRESHOLD_DISTANCE = 50;
+        public static float MINIMUM_ZOOM = 1;
 
     }
 
